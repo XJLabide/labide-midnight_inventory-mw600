@@ -1,11 +1,10 @@
 import type { Product, ProductInput, ReorderRequest, ReorderRequestInput, ReorderStatus } from "@/types/product";
-import { isProductStatus, validateProductInput } from "./productValidation.js";
+import { validateProductInput } from "./productValidation.js";
 
 export type Activity = { id: string; action: "Created" | "Updated" | "Deleted"; productName: string; timestamp: string };
 export type DashboardData = { totalProducts: number; totalStock: number; lowStock: number; stockValue: number; byCategory: Array<{ category: string; count: number }>; recentActivity: Activity[] };
 export type InventoryReport = { lowStock: Product[]; stockValue: number; totalUnits: number; lowStockValue: number; zeroStock: Product[]; criticalItems: number; highPriorityItems: number; mediumPriorityItems: number; byCategory: Array<{ category: string; products: number; stock: number; stockValue: number; lowStock: number }>; bySupplier: Array<{ supplier: string; products: number; stock: number; stockValue: number; lowStock: number }>; reorderStatuses: Array<{ status: ReorderStatus; count: number }> };
 
-const STORAGE_KEY = "midnight-inventory-products";
 const ACTIVITY_KEY = "midnight-inventory-activity";
 const REORDER_KEY = "midnight-inventory-reorders";
 const LOW_STOCK_THRESHOLD = 10;
@@ -17,26 +16,6 @@ const seedProducts: Product[] = [
   { id: 4, name: "Harbor USB Hub", category: "Accessories", description: "Compact seven-port USB-C hub with pass-through charging.", price: 64, stockQuantity: 5, supplier: "Signal Works", status: "Inactive", createdAt: "2026-02-20T09:00:00.000Z", updatedAt: "2026-02-20T09:00:00.000Z" },
 ];
 
-function isStoredProduct(value: unknown): value is Product {
-  if (!value || typeof value !== "object") return false;
-  const product = value as Partial<Product>;
-  return Number.isInteger(product.id) && typeof product.name === "string" && typeof product.category === "string" && typeof product.description === "string" && typeof product.supplier === "string" && typeof product.price === "number" && Number.isFinite(product.price) && typeof product.stockQuantity === "number" && Number.isInteger(product.stockQuantity) && product.stockQuantity >= 0 && isProductStatus(product.status) && typeof product.createdAt === "string" && typeof product.updatedAt === "string";
-}
-
-function readProducts(): Product[] {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) { writeProducts(seedProducts); return seedProducts; }
-  try {
-    const parsed: unknown = JSON.parse(saved);
-    if (!Array.isArray(parsed) || !parsed.every(isStoredProduct)) throw new Error("Saved product data has an invalid shape");
-    return parsed;
-  } catch (error) {
-    if (error instanceof Error && error.message.includes("invalid shape")) throw error;
-    throw new Error("Saved product data is unreadable. Clear local storage and try again.");
-  }
-}
-
-function writeProducts(products: Product[]) { localStorage.setItem(STORAGE_KEY, JSON.stringify(products)); }
 function readReorders(): ReorderRequest[] { const saved = localStorage.getItem(REORDER_KEY); if (!saved) return []; try { const parsed: unknown = JSON.parse(saved); if (!Array.isArray(parsed)) throw new Error(); return parsed as ReorderRequest[]; } catch { throw new Error("Saved reorder data is unreadable. Clear local storage and try again."); } }
 function writeReorders(requests: ReorderRequest[]) { localStorage.setItem(REORDER_KEY, JSON.stringify(requests)); }
 function validateReorder(input: ReorderRequestInput) { if (!Number.isInteger(input.productId) || !input.productName.trim() || !input.supplier.trim()) throw new Error("Product and supplier are required"); if (!Number.isInteger(input.quantity) || input.quantity <= 0) throw new Error("Reorder quantity must be a positive whole number"); const statuses: ReorderStatus[] = ["Draft", "Requested", "Ordered", "Received", "Cancelled"]; if (!statuses.includes(input.status)) throw new Error("Reorder status is invalid"); }
@@ -66,16 +45,26 @@ function groupProducts(products: Product[], field: "category" | "supplier") {
   }, {});
 }
 
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(path, { ...init, headers: { "content-type": "application/json", ...init?.headers } });
+  const body: unknown = await response.json();
+  if (!response.ok) {
+    const message = body && typeof body === "object" && "error" in body ? String(body.error) : "Inventory API request failed";
+    throw new Error(message);
+  }
+  return body as T;
+}
+
 export const api = {
-  async list() { return readProducts(); },
-  async get(id: number) { const product = readProducts().find((item) => item.id === id); if (!product) throw new Error("Product not found"); return product; },
-  async create(input: ProductInput) { validateProductInput(input); const products = readProducts(); const now = new Date().toISOString(); const product: Product = { ...input, id: getNextId(products), createdAt: now, updatedAt: now }; writeProducts([product, ...products]); recordActivity("Created", product.name); return product; },
-  async update(id: number, input: ProductInput) { validateProductInput(input); const products = readProducts(); const existing = products.find((item) => item.id === id); if (!existing) throw new Error("Product not found"); const product = { ...existing, ...input, updatedAt: new Date().toISOString() }; writeProducts(products.map((item) => item.id === id ? product : item)); recordActivity("Updated", product.name); return product; },
-  async remove(id: number) { const products = readProducts(); const product = products.find((item) => item.id === id); if (!product) throw new Error("Product not found"); writeProducts(products.filter((item) => item.id !== id)); recordActivity("Deleted", product.name); },
+  async list() { return request<Product[]>("/api/products"); },
+  async get(id: number) { return request<Product>(`/api/products/${id}`); },
+  async create(input: ProductInput) { validateProductInput(input); const product = await request<Product>("/api/products", { method: "POST", body: JSON.stringify(input) }); recordActivity("Created", product.name); return product; },
+  async update(id: number, input: ProductInput) { validateProductInput(input); const product = await request<Product>(`/api/products/${id}`, { method: "PUT", body: JSON.stringify(input) }); recordActivity("Updated", product.name); return product; },
+  async remove(id: number) { const product = await this.get(id); await request<{ success: boolean }>(`/api/products/${id}`, { method: "DELETE" }); recordActivity("Deleted", product.name); },
   async listReorders() { return readReorders(); },
   async createReorder(input: ReorderRequestInput) { validateReorder(input); const requests = readReorders(); const now = new Date().toISOString(); const request: ReorderRequest = { ...input, id: getNextId(requests), createdAt: now, updatedAt: now }; writeReorders([request, ...requests]); return request; },
   async updateReorder(id: number, input: ReorderRequestInput) { validateReorder(input); const requests = readReorders(); if (!requests.some((request) => request.id === id)) throw new Error("Reorder request not found"); const request: ReorderRequest = { ...input, id, createdAt: requests.find((item) => item.id === id)!.createdAt, updatedAt: new Date().toISOString() }; writeReorders(requests.map((item) => item.id === id ? request : item)); return request; },
   async removeReorder(id: number) { const requests = readReorders(); if (!requests.some((request) => request.id === id)) throw new Error("Reorder request not found"); writeReorders(requests.filter((request) => request.id !== id)); },
-  async dashboard(): Promise<DashboardData> { const products = readProducts(); const byCategory = Object.entries(groupProducts(products, "category")).map(([category, value]) => ({ category, count: value.products })); return { totalProducts: products.length, totalStock: products.reduce((sum, product) => sum + product.stockQuantity, 0), lowStock: products.filter((product) => product.stockQuantity <= LOW_STOCK_THRESHOLD).length, stockValue: calculateStockValue(products), byCategory, recentActivity: readActivity() }; },
-  async report(): Promise<InventoryReport> { const products = readProducts(); const lowStock = products.filter((product) => product.stockQuantity <= LOW_STOCK_THRESHOLD).sort((a, b) => a.stockQuantity - b.stockQuantity); const categories = Object.entries(groupProducts(products, "category")); const suppliers = Object.entries(groupProducts(products, "supplier")); const requests = readReorders(); const statusValues: ReorderStatus[] = ["Draft", "Requested", "Ordered", "Received", "Cancelled"]; return { lowStock, stockValue: calculateStockValue(products), totalUnits: products.reduce((sum, product) => sum + product.stockQuantity, 0), lowStockValue: calculateStockValue(lowStock), zeroStock: products.filter((product) => product.stockQuantity === 0), criticalItems: lowStock.filter((product) => reorderPriority(product.stockQuantity) === "Critical").length, highPriorityItems: lowStock.filter((product) => reorderPriority(product.stockQuantity) === "High").length, mediumPriorityItems: lowStock.filter((product) => reorderPriority(product.stockQuantity) === "Medium").length, byCategory: categories.map(([category, value]) => ({ category, ...value, stockValue: products.filter((product) => product.category === category).reduce((sum, product) => sum + product.price * product.stockQuantity, 0), lowStock: products.filter((product) => product.category === category && product.stockQuantity <= LOW_STOCK_THRESHOLD).length })), bySupplier: suppliers.map(([supplier, value]) => ({ supplier, ...value, stockValue: products.filter((product) => product.supplier === supplier).reduce((sum, product) => sum + product.price * product.stockQuantity, 0), lowStock: products.filter((product) => product.supplier === supplier && product.stockQuantity <= LOW_STOCK_THRESHOLD).length })), reorderStatuses: statusValues.map((status) => ({ status, count: requests.filter((request) => request.status === status).length })) }; },
+  async dashboard(): Promise<DashboardData> { const products = await this.list(); const byCategory = Object.entries(groupProducts(products, "category")).map(([category, value]) => ({ category, count: value.products })); return { totalProducts: products.length, totalStock: products.reduce((sum, product) => sum + product.stockQuantity, 0), lowStock: products.filter((product) => product.stockQuantity <= LOW_STOCK_THRESHOLD).length, stockValue: calculateStockValue(products), byCategory, recentActivity: readActivity() }; },
+  async report(): Promise<InventoryReport> { const products = await this.list(); const lowStock = products.filter((product) => product.stockQuantity <= LOW_STOCK_THRESHOLD).sort((a, b) => a.stockQuantity - b.stockQuantity); const categories = Object.entries(groupProducts(products, "category")); const suppliers = Object.entries(groupProducts(products, "supplier")); const requests = readReorders(); const statusValues: ReorderStatus[] = ["Draft", "Requested", "Ordered", "Received", "Cancelled"]; return { lowStock, stockValue: calculateStockValue(products), totalUnits: products.reduce((sum, product) => sum + product.stockQuantity, 0), lowStockValue: calculateStockValue(lowStock), zeroStock: products.filter((product) => product.stockQuantity === 0), criticalItems: lowStock.filter((product) => reorderPriority(product.stockQuantity) === "Critical").length, highPriorityItems: lowStock.filter((product) => reorderPriority(product.stockQuantity) === "High").length, mediumPriorityItems: lowStock.filter((product) => reorderPriority(product.stockQuantity) === "Medium").length, byCategory: categories.map(([category, value]) => ({ category, ...value, stockValue: products.filter((product) => product.category === category).reduce((sum, product) => sum + product.price * product.stockQuantity, 0), lowStock: products.filter((product) => product.category === category && product.stockQuantity <= LOW_STOCK_THRESHOLD).length })), bySupplier: suppliers.map(([supplier, value]) => ({ supplier, ...value, stockValue: products.filter((product) => product.supplier === supplier).reduce((sum, product) => sum + product.price * product.stockQuantity, 0), lowStock: products.filter((product) => product.supplier === supplier && product.stockQuantity <= LOW_STOCK_THRESHOLD).length })), reorderStatuses: statusValues.map((status) => ({ status, count: requests.filter((request) => request.status === status).length })) }; },
 };

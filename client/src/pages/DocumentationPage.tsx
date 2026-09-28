@@ -3,28 +3,16 @@ import { AnimatePresence, motion } from "motion/react";
 import { IconChevronRight, IconCode, IconCopy, IconFileCode2, IconFolder } from "@tabler/icons-react";
 import { PageHeader } from "@/components/layout/PageHeader";
 
-const apiExample = `// client/src/lib/api.ts
-export const api = {
-  async list() {
-    return readProducts();
-  },
+const apiExample = `// GET /api/products
+SELECT id, name, category, price, stock_quantity, supplier, status
+FROM products
+ORDER BY id DESC;
 
-  async create(input: ProductInput) {
-    validateProductInput(input);
-    const product = createProduct(input);
-    writeProducts([product, ...readProducts()]);
-    return product;
-  },
-
-  async update(id: number, input: ProductInput) {
-    validateProductInput(input);
-    return updateStoredProduct(id, input);
-  },
-
-  async report() {
-    return buildInventoryReport(readProducts());
-  },
-};`;
+// GET /api/products/:id
+SELECT id, name, category, description, price, stock_quantity,
+       supplier, status, created_at, updated_at
+FROM products
+WHERE id = ?;`;
 
 const apiGroups = [
   { title: "Products", methods: "list · get · create · update · remove", description: "Loads and manages product records. Create and update validate the product input before saving." },
@@ -73,7 +61,7 @@ export function DocumentationPage() {
         <section className="overflow-hidden rounded-lg border border-line bg-panel">
           <div className="border-b border-line p-5 md:p-6">
             <div className="flex items-center gap-2 text-copy"><IconCode size={18} /><h2 className="font-medium">API layer</h2></div>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Pages never read or write browser storage directly. They call the asynchronous <code className="rounded bg-ink px-1.5 py-0.5 text-copy">api</code> methods, which currently persist locally and can later be replaced with HTTP requests without changing the interface.</p>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Product methods call the local HTTP server, which reads and writes SQLite. Reorder requests and recent activity are still stored in browser localStorage.</p>
           </div>
           <AnimatePresence initial={false}>
             {selected && <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">

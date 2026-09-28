@@ -1,19 +1,21 @@
 # Midnight Inventory
 
-Static product information system built with React, TypeScript, Vite, Tailwind CSS v4, and Animate UI-compatible components.
+Inventory information system built with React, TypeScript, Vite, Tailwind CSS v4, and a local SQLite API server.
 
 Project design and implementation rules are documented in [GUIDELINES.md](./GUIDELINES.md). Update that file when a new requirement is confirmed.
 
 ## Run locally
 
-Requires Node.js 24 LTS or newer.
+Requires Node.js 24 LTS or newer (for the built-in `node:sqlite` module).
 
 ```bash
 npm install
 npm run dev
 ```
 
-Build and preview the static site:
+This starts the Vite app and the API server together. Vite serves the app on port 3001 and forwards `/api` requests to the server on port 3002. Set `API_PORT` to change the server port.
+
+Build and preview the client:
 
 ```bash
 npm run build
@@ -28,9 +30,9 @@ npm test
 
 ## API approach
 
-This version is intentionally frontend-only. CRUD operations are exposed through the asynchronous API module at `client/src/lib/api.ts`, which uses the browser `localStorage` Web API for persistence. Pages call `api.list()`, `api.get()`, `api.create()`, `api.update()`, and `api.remove()` rather than accessing storage directly.
+Product CRUD operations are exposed through the asynchronous API module at `client/src/lib/api.ts`. It calls the local HTTP server, which stores products in `data/inventory.sqlite` using SQLite. Product retrieval is available through `GET /api/products` and `GET /api/products/:id`; create, update, and delete use the corresponding `POST`, `PUT`, and `DELETE` routes.
 
-The module is the boundary for a future HTTP API integration: its implementation can later be replaced with `fetch()` calls without changing the four page components.
+Reorder requests and recent activity still use browser `localStorage`.
 
 ## Pages
 
@@ -39,4 +41,4 @@ The module is the boundary for a future HTTP API integration: its implementation
 - Product Details
 - Inventory Reports
 
-Data can be reset by clearing the site’s local storage in the browser developer tools.
+Product data can be reset by stopping the server and removing `data/inventory.sqlite`; the server recreates the database and sample products on the next start. Reorder requests and recent activity can be reset by clearing site local storage.

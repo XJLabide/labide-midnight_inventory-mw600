@@ -4,7 +4,7 @@ This document is the source of truth for design, UX, structure, and implementati
 
 ## Product direction
 
-- Build a static product information system using React, TypeScript, Vite, Tailwind CSS v4, shadcn-compatible structure, and Animate UI-compatible motion.
+- Build an inventory information system using React, TypeScript, Vite, Tailwind CSS v4, shadcn-compatible structure, Animate UI-compatible motion, and a local SQLite server.
 - Keep the application focused on four major pages:
   - Dashboard
   - Products
@@ -12,7 +12,7 @@ This document is the source of truth for design, UX, structure, and implementati
   - Reorder Center
   - Inventory Reports
 - Keep CRUD behavior behind `client/src/lib/api.ts`. Pages must not access `localStorage` directly.
-- Use localStorage for the current frontend-only version. Do not introduce a backend unless explicitly requested.
+- Store product records in SQLite through the local HTTP server. Reorder requests and recent activity remain in localStorage for now.
 
 ## Reference image rules
 

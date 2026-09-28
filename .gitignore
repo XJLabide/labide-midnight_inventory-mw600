@@ -4,3 +4,6 @@ dist/
 .env
 .DS_Store
 .omx/
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
